@@ -1,0 +1,240 @@
+// ClimateIQ — Climate Intelligence & Heatwave Early Warning System for India
+// PostgreSQL schema managed by Prisma ORM.
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum StateType {
+  STATE
+  UNION_TERRITORY
+}
+
+enum RiskLevel {
+  VERY_LOW
+  LOW
+  MEDIUM
+  HIGH
+  EXTREME
+}
+
+// ───────────────────────────── Users & auth ─────────────────────────────
+
+model User {
+  id           Int      @id @default(autoincrement())
+  fullName     String   @db.VarChar(100)
+  email        String   @unique @db.VarChar(255)
+  passwordHash String   @db.VarChar(255)
+  phoneNumber  String   @db.VarChar(20)
+  city         String   @db.VarChar(100)
+  stateId      Int?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  state         State?              @relation(fields: [stateId], references: [id], onDelete: SetNull)
+  sessions      Session[]
+  favorites     UserFavorite[]
+  searchHistory UserSearchHistory[]
+
+  @@map("users")
+}
+
+// Server-side sessions: the cookie holds a random token, the DB stores only its HMAC.
+model Session {
+  id        Int      @id @default(autoincrement())
+  tokenHash String   @unique @db.VarChar(128)
+  userId    Int
+  expiresAt DateTime
+  createdAt DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@map("sessions")
+}
+
+// ───────────────────────────── Geography ─────────────────────────────
+
+model State {
+  id        Int       @id @default(autoincrement())
+  name      String    @unique @db.VarChar(100)
+  code      String    @unique @db.VarChar(4)
+  type      StateType
+  capital   String?   @db.VarChar(100)
+  // Representative coordinates (the state's representative monitoring city)
+  latitude  Float
+  longitude Float
+
+  users              User[]
+  monitoringLocations MonitoringLocation[]
+  weatherRecords     WeatherRecord[]
+  forecasts          Forecast[]
+  historicalWeather  HistoricalWeather[]
+  heatRisks          HeatRisk[]
+  favorites          UserFavorite[]
+  searchHistory      UserSearchHistory[]
+
+  @@map("states")
+}
+
+// Fixed geographical monitoring points. No weather values are stored here.
+model MonitoringLocation {
+  id               Int     @id @default(autoincrement())
+  name             String  @db.VarChar(100)
+  stateId          Int
+  latitude         Float
+  longitude        Float
+  isRepresentative Boolean @default(false)
+
+  state          State           @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  weatherRecords WeatherRecord[]
+  heatRisks      HeatRisk[]
+
+  @@unique([name, stateId])
+  @@index([stateId])
+  @@map("monitoring_locations")
+}
+
+// ───────────────────────────── Weather data (from Open-Meteo) ─────────────────────────────
+
+model WeatherRecord {
+  id                  Int      @id @default(autoincrement())
+  stateId             Int
+  locationId          Int?
+  latitude            Float
+  longitude           Float
+  temperature         Float
+  apparentTemperature Float
+  humidity            Int
+  weatherCode         Int
+  weatherCondition    String   @db.VarChar(60)
+  windSpeed           Float
+  observedAt          DateTime // observation time reported by Open-Meteo
+  recordedAt          DateTime @default(now()) // time ClimateIQ fetched it (snapshot id)
+
+  state    State               @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  location MonitoringLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([stateId, recordedAt])
+  @@index([recordedAt])
+  @@map("weather_records")
+}
+
+model Forecast {
+  id                  Int      @id @default(autoincrement())
+  stateId             Int
+  date                DateTime @db.Date
+  minTemperature      Float
+  maxTemperature      Float
+  apparentTemperature Float // daily maximum apparent temperature
+  weatherCode         Int
+  weatherCondition    String   @db.VarChar(60)
+  precipitation       Float
+  windSpeed           Float
+  riskScore           Int?
+  riskLevel           RiskLevel?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  state State @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  @@unique([stateId, date])
+  @@map("forecasts")
+}
+
+model HistoricalWeather {
+  id                  Int      @id @default(autoincrement())
+  stateId             Int
+  date                DateTime @db.Date
+  minTemperature      Float
+  maxTemperature      Float
+  averageTemperature  Float
+  apparentTemperature Float // daily maximum apparent temperature
+  source              String   @db.VarChar(40)
+  createdAt           DateTime @default(now())
+
+  state State @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  @@unique([stateId, date])
+  @@map("historical_weather")
+}
+
+model HeatRisk {
+  id                  Int       @id @default(autoincrement())
+  stateId             Int
+  locationId          Int?
+  latitude            Float
+  longitude           Float
+  temperature         Float
+  apparentTemperature Float
+  humidity            Int
+  score               Int
+  riskLevel           RiskLevel
+  factors             Json
+  calculatedAt        DateTime  @default(now())
+
+  state    State               @relation(fields: [stateId], references: [id], onDelete: Cascade)
+  location MonitoringLocation? @relation(fields: [locationId], references: [id], onDelete: SetNull)
+
+  @@index([stateId, calculatedAt])
+  @@index([calculatedAt])
+  @@map("heat_risk")
+}
+
+// ───────────────────────────── User-owned data ─────────────────────────────
+
+model UserFavorite {
+  id        Int      @id @default(autoincrement())
+  userId    Int
+  stateId   Int
+  createdAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  state State @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, stateId])
+  @@map("user_favorites")
+}
+
+model UserSearchHistory {
+  id         Int      @id @default(autoincrement())
+  userId     Int
+  stateId    Int
+  searchedAt DateTime @default(now())
+
+  user  User  @relation(fields: [userId], references: [id], onDelete: Cascade)
+  state State @relation(fields: [stateId], references: [id], onDelete: Cascade)
+
+  @@index([userId, searchedAt])
+  @@map("user_search_history")
+}
+
+// ───────────────────────────── Reference content ─────────────────────────────
+
+model SafetyTip {
+  id          Int        @id @default(autoincrement())
+  riskLevel   RiskLevel? // null = general guidance for every level
+  category    String     @db.VarChar(40)
+  title       String     @db.VarChar(120)
+  description String
+  sortOrder   Int        @default(0)
+
+  @@index([riskLevel])
+  @@map("safety_tips")
+}
+
+model EmergencyContact {
+  id          Int    @id @default(autoincrement())
+  name        String @db.VarChar(120)
+  phone       String @db.VarChar(20)
+  description String
+  source      String @db.VarChar(200)
+  sortOrder   Int    @default(0)
+
+  @@map("emergency_contacts")
+}
