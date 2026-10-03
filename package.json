@@ -16,7 +16,8 @@
     "db:start": "\"C:/Program Files/PostgreSQL/18/bin/pg_ctl.exe\" -D .pgdata -o \"-p 5544\" -l .pgdata/server.log start",
     "db:stop": "\"C:/Program Files/PostgreSQL/18/bin/pg_ctl.exe\" -D .pgdata stop -m fast",
     "test": "node --test tests/heatRisk.test.mjs",
-    "vercel-build": "prisma generate && prisma migrate deploy && next build"
+    "vercel-build": "prisma generate && prisma migrate deploy && next build",
+    "db:supabase-sql": "node scripts/generate-supabase-sql.mjs"
   },
   "prisma": {
     "seed": "node prisma/seed.mjs"

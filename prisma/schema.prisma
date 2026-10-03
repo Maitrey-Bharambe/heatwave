@@ -5,9 +5,13 @@ generator client {
   provider = "prisma-client-js"
 }
 
+// Supabase: DATABASE_URL = transaction pooler (port 6543, ?pgbouncer=true) used by the app;
+// DIRECT_URL = session/direct connection (port 5432) used by Prisma migrations.
+// Locally both can point at the same database.
 datasource db {
-  provider = "postgresql"
-  url      = env("DATABASE_URL")
+  provider  = "postgresql"
+  url       = env("DATABASE_URL")
+  directUrl = env("DIRECT_URL")
 }
 
 enum StateType {

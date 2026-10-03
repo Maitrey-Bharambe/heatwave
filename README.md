@@ -38,7 +38,7 @@ Heatwaves are among India's deadliest weather hazards, and heat stress depends o
 |---|---|
 | Frontend | Next.js 16 (App Router), React 19, JavaScript (JSX), CSS (organised global stylesheet `styles/globals.css`) |
 | Backend | Next.js Route Handlers (`app/api/**/route.js`) |
-| Database | PostgreSQL |
+| Database | PostgreSQL (hosted on Supabase) |
 | ORM | Prisma 6 (schema, migrations, relations, parameterised queries) |
 | External API | Open-Meteo (forecast, ERA5 archive) — free, no API key |
 | Map | Leaflet 1.9 + leaflet.heat, Esri gray canvas basemap |
@@ -269,24 +269,40 @@ GET  /api/safety[?level=HIGH]                            GET /api/emergency
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | yes | PostgreSQL connection string |
+| `DATABASE_URL` | yes | Connection used by the app. On Supabase: **Transaction pooler** (port 6543) with `?pgbouncer=true&connection_limit=1` |
+| `DIRECT_URL` | yes | Connection used by Prisma migrations. On Supabase: **Session pooler / direct** (port 5432). Locally: same as `DATABASE_URL` |
 | `SESSION_SECRET` | yes | Random string, ≥ 32 characters (`openssl rand -base64 32`) |
 
-Copy `.env.example` to `.env` and fill them in. Open-Meteo needs no key.
+Copy `.env.example` to `.env` and fill them in. Open-Meteo needs no key. ClimateIQ does **not** use the Supabase anon key or service_role key: all database access goes through Prisma on the server.
 
-## 14. Installation and local development
+## 14. Database on Supabase
 
-Prerequisites: Node.js ≥ 20.9 and PostgreSQL 14+.
+Supabase provides the PostgreSQL database; the app talks to it through Prisma like any other PostgreSQL server.
+
+1. **Create the tables:** Supabase → SQL Editor → New query → paste [`supabase/schema.sql`](supabase/schema.sql) → Run. This creates the 2 enums, 12 tables, primary/foreign keys, unique constraints and indexes, and enables Row Level Security on every table. With no policies, Supabase's public Data API cannot read the tables (for example password hashes); Prisma connects as the table owner and is unaffected.
+2. **Add the reference data:** new query → paste [`supabase/seed.sql`](supabase/seed.sql) → Run. The final check should show 36 states, 67 monitoring locations, 19 safety tips and 8 emergency contacts. It is safe to re-run.
+3. **Connection strings:** Supabase → Connect → ORMs → Prisma. Put them in `.env` as `DATABASE_URL` (port 6543) and `DIRECT_URL` (port 5432).
+4. **Tell Prisma the tables already exist** (once), so `prisma migrate deploy` on Vercel doesn't try to create them again:
+
+```bash
+npx prisma migrate resolve --applied 20261003035319_init
+```
+
+Both SQL files are generated from the Prisma migration and seed data by `npm run db:supabase-sql`; regenerate them after any schema change. (Alternative to steps 1, 2 and 4: run `npx prisma migrate deploy` and `npm run db:seed` against Supabase.)
+
+## 15. Local development
+
+Prerequisites: Node.js ≥ 20.9 and a PostgreSQL database (Supabase or local).
 
 ```bash
 npm install
 ```
 
 ```bash
-cp .env.example .env    # then edit DATABASE_URL and SESSION_SECRET
+cp .env.example .env
 ```
 
-Create the database and apply the migration:
+Using Supabase, follow §14 and skip the next two commands. For a local PostgreSQL database, create the tables:
 
 ```bash
 npx prisma migrate deploy
@@ -306,19 +322,18 @@ npm run dev
 
 During development, change the schema with `npm run db:migrate` (`prisma migrate dev`). Run the engine tests with `npm test`.
 
-> **This machine:** a project-local PostgreSQL 18 cluster lives in `.pgdata/` (port 5544) and `.env` already points to it. Start it with `npm run db:start` and stop it with `npm run db:stop`. To use another server instead, change `DATABASE_URL`, then run `npx prisma migrate deploy` and `npm run db:seed`.
+> **Local cluster on the author's machine:** a project-local PostgreSQL 18 cluster lives in `.pgdata/` (port 5544). Start it with `npm run db:start` and stop it with `npm run db:stop`.
 
-## 15. Deployment (GitHub → Vercel → PostgreSQL)
+## 16. Deployment (GitHub → Vercel → Supabase)
 
-1. Create a hosted PostgreSQL database (Neon, Supabase, Vercel Postgres…). Use the **pooled** connection string for serverless.
-2. Push the repository to GitHub and import it in Vercel.
-3. Set `DATABASE_URL` and `SESSION_SECRET` in Vercel → Project → Settings → Environment Variables.
-4. Vercel runs the `vercel-build` script: `prisma generate && prisma migrate deploy && next build`.
-5. Seed once against the production database: `DATABASE_URL=<prod url> npm run db:seed`.
+1. Set up the Supabase database (§14).
+2. Import the GitHub repository in Vercel.
+3. Add `DATABASE_URL`, `DIRECT_URL` and `SESSION_SECRET` in Vercel → Project → Settings → Environment Variables.
+4. Deploy. Vercel runs `vercel-build`: `prisma generate && prisma migrate deploy && next build`, which finds no pending migrations after step 4 of §14.
 
 Leaflet is loaded client-side only (`next/dynamic`, `ssr: false`), GeoJSON is served statically from `/public`, and no localhost URLs are hard-coded. The in-memory cache is per serverless instance; PostgreSQL holds the last snapshot for every instance as a fallback.
 
-## 16. Data sources and credits
+## 17. Data sources and credits
 
 - Weather: [Open-Meteo](https://open-meteo.com/) (CC BY 4.0) — forecast API and ERA5 historical archive.
 - Boundaries: [udit-001/india-maps-data](https://github.com/udit-001/india-maps-data) district GeoJSON, dissolved to States/UTs with mapshaper.
