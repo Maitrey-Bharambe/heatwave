@@ -1,7 +1,9 @@
 // Generates the SQL files to paste into the Supabase SQL Editor:
 //   supabase/schema.sql — tables, enums, keys, indexes (from the Prisma migration) + RLS lockdown
 //   supabase/seed.sql   — states/UTs, monitoring locations, safety tips, emergency contacts
+//   supabase/setup.sql  — schema.sql + seed.sql in one file (paste once, click Run)
 // Run: node scripts/generate-supabase-sql.mjs
+import crypto from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 import { STATES } from '../lib/states.js';
@@ -15,20 +17,37 @@ const tables = [];
 let schema = `-- ClimateIQ — Supabase schema
 -- Paste into Supabase → SQL Editor → New query → Run (once, on an empty project).
 -- Generated from prisma/migrations by scripts/generate-supabase-sql.mjs — do not edit by hand.
--- Afterwards mark the migration as applied (see README → Supabase):
---   npx prisma migrate resolve --applied ${migrations.at(-1)}
 
 `;
+const applied = [];
 for (const m of migrations) {
-  const sql = fs.readFileSync(path.join(migrationsDir, m, 'migration.sql'), 'utf8').replace(/\r\n/g, '\n');
+  const raw = fs.readFileSync(path.join(migrationsDir, m, 'migration.sql'));
+  applied.push({ name: m, checksum: crypto.createHash('sha256').update(raw).digest('hex') });
+  const sql = raw.toString('utf8').replace(/\r\n/g, '\n');
   for (const match of sql.matchAll(/CREATE TABLE "([^"]+)"/g)) tables.push(match[1]);
   schema += `-- ───────── migration ${m} ─────────\n${sql.trim()}\n\n`;
 }
-schema += `-- ───────── Row Level Security ─────────
+schema += `-- ───────── Prisma migration history ─────────
+-- Records the migrations above as applied, so \`prisma migrate deploy\` (run by Vercel's
+-- build) sees no pending migrations instead of trying to create the tables again.
+CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+    "id"                  VARCHAR(36) PRIMARY KEY NOT NULL,
+    "checksum"            VARCHAR(64) NOT NULL,
+    "finished_at"         TIMESTAMPTZ,
+    "migration_name"      VARCHAR(255) NOT NULL,
+    "logs"                TEXT,
+    "rolled_back_at"      TIMESTAMPTZ,
+    "started_at"          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "applied_steps_count" INTEGER NOT NULL DEFAULT 0
+);
+${applied.map((a) => `INSERT INTO "_prisma_migrations" ("id", "checksum", "finished_at", "migration_name", "applied_steps_count")
+VALUES (gen_random_uuid()::text, '${a.checksum}', now(), '${a.name}', 1);`).join('\n')}
+
+-- ───────── Row Level Security ─────────
 -- ClimateIQ talks to Postgres only through Prisma on the server (as the table owner, which
 -- bypasses RLS). Enabling RLS with NO policies blocks Supabase's public Data API (anon /
 -- authenticated keys) from reading or writing these tables — e.g. users.passwordHash.
-${tables.map((t) => `ALTER TABLE "${t}" ENABLE ROW LEVEL SECURITY;`).join('\n')}
+${[...tables, '_prisma_migrations'].map((t) => `ALTER TABLE "${t}" ENABLE ROW LEVEL SECURITY;`).join('\n')}
 `;
 
 const q = (v) => (v === null || v === undefined ? 'NULL' : `'${String(v).replace(/'/g, "''")}'`);
@@ -77,4 +96,6 @@ SELECT (SELECT count(*) FROM "states") AS states,
 fs.mkdirSync(path.join(root, 'supabase'), { recursive: true });
 fs.writeFileSync(path.join(root, 'supabase', 'schema.sql'), schema);
 fs.writeFileSync(path.join(root, 'supabase', 'seed.sql'), seed);
-console.log(`Wrote supabase/schema.sql (${tables.length} tables) and supabase/seed.sql`);
+fs.writeFileSync(path.join(root, 'supabase', 'setup.sql'), `${schema}
+${seed}`);
+console.log(`Wrote supabase/schema.sql (${tables.length} tables), supabase/seed.sql and supabase/setup.sql`);

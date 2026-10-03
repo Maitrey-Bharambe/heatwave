@@ -279,16 +279,10 @@ Copy `.env.example` to `.env` and fill them in. Open-Meteo needs no key. Climate
 
 Supabase provides the PostgreSQL database; the app talks to it through Prisma like any other PostgreSQL server.
 
-1. **Create the tables:** Supabase → SQL Editor → New query → paste [`supabase/schema.sql`](supabase/schema.sql) → Run. This creates the 2 enums, 12 tables, primary/foreign keys, unique constraints and indexes, and enables Row Level Security on every table. With no policies, Supabase's public Data API cannot read the tables (for example password hashes); Prisma connects as the table owner and is unaffected.
-2. **Add the reference data:** new query → paste [`supabase/seed.sql`](supabase/seed.sql) → Run. The final check should show 36 states, 67 monitoring locations, 19 safety tips and 8 emergency contacts. It is safe to re-run.
-3. **Connection strings:** Supabase → Connect → ORMs → Prisma. Put them in `.env` as `DATABASE_URL` (port 6543) and `DIRECT_URL` (port 5432).
-4. **Tell Prisma the tables already exist** (once), so `prisma migrate deploy` on Vercel doesn't try to create them again:
+1. **Create everything in one go:** Supabase → SQL Editor → New query → paste [`supabase/setup.sql`](supabase/setup.sql) → Run. It creates the 2 enums, 12 tables, primary/foreign keys, unique constraints and indexes, records the Prisma migration as applied (so Vercel's `prisma migrate deploy` finds nothing to do), enables Row Level Security on every table, and inserts the reference data. The last result row should read 36 states, 67 monitoring locations, 19 safety tips and 8 emergency contacts.
+2. **Connection strings:** Supabase → Connect → ORMs → Prisma. Put them in `.env` (and in Vercel) as `DATABASE_URL` (transaction pooler, port 6543) and `DIRECT_URL` (session pooler, port 5432).
 
-```bash
-npx prisma migrate resolve --applied 20261003035319_init
-```
-
-Both SQL files are generated from the Prisma migration and seed data by `npm run db:supabase-sql`; regenerate them after any schema change. (Alternative to steps 1, 2 and 4: run `npx prisma migrate deploy` and `npm run db:seed` against Supabase.)
+Row Level Security with no policies means Supabase's public Data API cannot read the tables (for example password hashes); Prisma connects as the table owner and is unaffected. `setup.sql` is `schema.sql` + `seed.sql`; `seed.sql` alone is safe to re-run. All three are generated from the Prisma migration and seed data by `npm run db:supabase-sql`; regenerate them after any schema change. (Alternative: run `npx prisma migrate deploy` and `npm run db:seed` against Supabase.)
 
 ## 15. Local development
 
@@ -329,7 +323,7 @@ During development, change the schema with `npm run db:migrate` (`prisma migrate
 1. Set up the Supabase database (§14).
 2. Import the GitHub repository in Vercel.
 3. Add `DATABASE_URL`, `DIRECT_URL` and `SESSION_SECRET` in Vercel → Project → Settings → Environment Variables.
-4. Deploy. Vercel runs `vercel-build`: `prisma generate && prisma migrate deploy && next build`, which finds no pending migrations after step 4 of §14.
+4. Deploy. `vercel.json` pins functions to `syd1` (Sydney), next to the Supabase database in ap-southeast-2; change it if your Supabase region differs. Vercel runs `vercel-build`: `prisma generate && prisma migrate deploy && next build`; after `setup.sql` there are no pending migrations.
 
 Leaflet is loaded client-side only (`next/dynamic`, `ssr: false`), GeoJSON is served statically from `/public`, and no localhost URLs are hard-coded. The in-memory cache is per serverless instance; PostgreSQL holds the last snapshot for every instance as a fallback.
 

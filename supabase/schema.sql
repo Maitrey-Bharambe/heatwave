@@ -1,8 +1,6 @@
 -- ClimateIQ — Supabase schema
 -- Paste into Supabase → SQL Editor → New query → Run (once, on an empty project).
 -- Generated from prisma/migrations by scripts/generate-supabase-sql.mjs — do not edit by hand.
--- Afterwards mark the migration as applied (see README → Supabase):
---   npx prisma migrate resolve --applied 20261003035319_init
 
 -- ───────── migration 20261003035319_init ─────────
 -- CreateEnum
@@ -265,6 +263,22 @@ ALTER TABLE "user_search_history" ADD CONSTRAINT "user_search_history_userId_fke
 -- AddForeignKey
 ALTER TABLE "user_search_history" ADD CONSTRAINT "user_search_history_stateId_fkey" FOREIGN KEY ("stateId") REFERENCES "states"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 
+-- ───────── Prisma migration history ─────────
+-- Records the migrations above as applied, so `prisma migrate deploy` (run by Vercel's
+-- build) sees no pending migrations instead of trying to create the tables again.
+CREATE TABLE IF NOT EXISTS "_prisma_migrations" (
+    "id"                  VARCHAR(36) PRIMARY KEY NOT NULL,
+    "checksum"            VARCHAR(64) NOT NULL,
+    "finished_at"         TIMESTAMPTZ,
+    "migration_name"      VARCHAR(255) NOT NULL,
+    "logs"                TEXT,
+    "rolled_back_at"      TIMESTAMPTZ,
+    "started_at"          TIMESTAMPTZ NOT NULL DEFAULT now(),
+    "applied_steps_count" INTEGER NOT NULL DEFAULT 0
+);
+INSERT INTO "_prisma_migrations" ("id", "checksum", "finished_at", "migration_name", "applied_steps_count")
+VALUES (gen_random_uuid()::text, 'd3cba0f92b2bd9500c4872b17cb4c00be07c30079aad541af991766f3c0c5c6d', now(), '20261003035319_init', 1);
+
 -- ───────── Row Level Security ─────────
 -- ClimateIQ talks to Postgres only through Prisma on the server (as the table owner, which
 -- bypasses RLS). Enabling RLS with NO policies blocks Supabase's public Data API (anon /
@@ -281,3 +295,4 @@ ALTER TABLE "user_favorites" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "user_search_history" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "safety_tips" ENABLE ROW LEVEL SECURITY;
 ALTER TABLE "emergency_contacts" ENABLE ROW LEVEL SECURITY;
+ALTER TABLE "_prisma_migrations" ENABLE ROW LEVEL SECURITY;
