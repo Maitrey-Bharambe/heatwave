@@ -1,7 +1,6 @@
-import prisma from '@/lib/prisma';
+import { db, run } from '@/lib/db';
 import { json } from '@/lib/http';
 
 export async function GET() {
-  const contacts = await prisma.emergencyContact.findMany({ orderBy: { sortOrder: 'asc' } });
-  return json({ contacts });
+  return json({ contacts: await run(db().from('emergency_contacts').select('*').order('sortOrder')) });
 }

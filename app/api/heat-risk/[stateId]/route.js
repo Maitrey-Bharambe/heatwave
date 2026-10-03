@@ -1,4 +1,4 @@
-import prisma from '@/lib/prisma';
+import { db, run, withIso } from '@/lib/db';
 import { getRiskSnapshot, resolveState, pointsForState } from '@/lib/riskService';
 import { FACTOR_DEFINITIONS, HOT_DAY_THRESHOLD_C } from '@/lib/heatRisk';
 import { RISK_LEVELS, RISK_DISCLAIMER } from '@/lib/riskLevels';
@@ -15,13 +15,11 @@ export async function GET(_request, { params }) {
     if (!rep?.risk) return error('Heat-risk estimate unavailable — weather data could not be retrieved.', 503, { meta });
 
     const [tips, trend] = await Promise.all([
-      prisma.safetyTip.findMany({ where: { riskLevel: rep.risk.riskLevel }, orderBy: { sortOrder: 'asc' } }),
+      run(db().from('safety_tips').select('*').eq('riskLevel', rep.risk.riskLevel).order('sortOrder')),
       // READ from persisted heat_risk rows: how this location's score evolved (last 48 h).
-      prisma.heatRisk.findMany({
-        where: { locationId: rep.id, calculatedAt: { gte: new Date(Date.now() - 48 * 3600000) } },
-        orderBy: { calculatedAt: 'asc' },
-        select: { score: true, calculatedAt: true },
-      }),
+      run(db().from('heat_risk').select('score, calculatedAt').eq('locationId', rep.id)
+        .gte('calculatedAt', new Date(Date.now() - 48 * 3600000).toISOString()).order('calculatedAt'))
+        .then((rows) => withIso(rows, ['calculatedAt'])),
     ]);
 
     return json({

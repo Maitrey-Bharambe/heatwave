@@ -10,7 +10,10 @@ import AppShell from '@/components/AppShell';
 // (favorites, profile) require login. The fallback state (when the URL has no ?state=)
 // is the last state the visitor chose, then the user's home state, then Maharashtra.
 export default async function AppLayout({ children }) {
-  const [user, states, jar] = await Promise.all([getCurrentUser(), getStates(), cookies()]);
+  // Reading cookies first marks every app page as dynamic, so nothing queries the
+  // database at build time.
+  const jar = await cookies();
+  const [user, states] = await Promise.all([getCurrentUser(), getStates()]);
   const last = jar.get('ciq_state')?.value?.toUpperCase();
   const codes = new Set(states.map((s) => s.code));
   const fallbackCode = [last, user?.state?.code, DEFAULT_STATE_CODE].find((c) => c && codes.has(c));

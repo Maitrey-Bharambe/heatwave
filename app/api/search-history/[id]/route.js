@@ -1,4 +1,4 @@
-import prisma from '@/lib/prisma';
+import { db, run } from '@/lib/db';
 import { json, error, requireUser, parseId } from '@/lib/http';
 
 export async function DELETE(_request, { params }) {
@@ -6,7 +6,7 @@ export async function DELETE(_request, { params }) {
   if (deny) return deny;
   const id = parseId((await params).id);
   if (!id) return error('Invalid entry id.', 422);
-  const { count } = await prisma.userSearchHistory.deleteMany({ where: { id, userId: user.id } });
-  if (!count) return error('Entry not found.', 404);
+  const deleted = await run(db().from('user_search_history').delete().eq('id', id).eq('userId', user.id).select('id'));
+  if (!deleted.length) return error('Entry not found.', 404);
   return json({ ok: true });
 }

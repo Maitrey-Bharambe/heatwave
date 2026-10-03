@@ -1,4 +1,4 @@
-import prisma from '@/lib/prisma';
+import { db, run, isoUtc } from '@/lib/db';
 import { cached } from '@/lib/cache';
 import { fetchHistorical, istDate, addDays } from '@/lib/openMeteo';
 import { resolveState } from '@/lib/riskService';
@@ -33,25 +33,19 @@ export async function GET(request, { params }) {
     start = addDays(yesterday, -(days - 1));
   }
 
-  const rep = await prisma.monitoringLocation.findFirst({ where: { stateId: state.id, isRepresentative: true }, select: { name: true } });
+  const [rep] = await run(db().from('monitoring_locations').select('name').eq('stateId', state.id).eq('isRepresentative', true).limit(1));
   const location = rep?.name || state.capital;
 
   try {
     const { value: rows, storedAt, fromCache } = await cached(`history:${state.code}:${start}:${end}`, 6 * 3600 * 1000, async () => {
       const data = await fetchHistorical(state.latitude, state.longitude, start, end);
-      // Persist into historical_weather (unique stateId + date, so replace those dates).
+      // Persist into historical_weather (upsert on the unique stateId + date).
       if (data.length) {
-        const dates = data.map((r) => new Date(`${r.date}T00:00:00Z`));
-        await prisma.$transaction([
-          prisma.historicalWeather.deleteMany({ where: { stateId: state.id, date: { in: dates } } }),
-          prisma.historicalWeather.createMany({
-            data: data.map((r) => ({
-              stateId: state.id, date: new Date(`${r.date}T00:00:00Z`), minTemperature: r.minTemperature,
-              maxTemperature: r.maxTemperature, averageTemperature: r.averageTemperature,
-              apparentTemperature: r.apparentTemperature, source: r.source,
-            })),
-          }),
-        ]).catch((e) => console.error('[history] persist failed:', e.message));
+        await run(db().from('historical_weather').upsert(data.map((r) => ({
+          stateId: state.id, date: r.date, minTemperature: r.minTemperature,
+          maxTemperature: r.maxTemperature, averageTemperature: r.averageTemperature,
+          apparentTemperature: r.apparentTemperature, source: r.source,
+        })), { onConflict: 'stateId,date' })).catch((e) => console.error('[history] persist failed:', e.message));
       }
       return data;
     });
@@ -61,15 +55,13 @@ export async function GET(request, { params }) {
     });
   } catch {
     // Fall back to rows previously stored in PostgreSQL for this range.
-    const stored = await prisma.historicalWeather.findMany({
-      where: { stateId: state.id, date: { gte: new Date(`${start}T00:00:00Z`), lte: new Date(`${end}T00:00:00Z`) } },
-      orderBy: { date: 'asc' },
-    }).catch(() => []);
+    const stored = await run(db().from('historical_weather').select('*').eq('stateId', state.id)
+      .gte('date', start).lte('date', end).order('date')).catch(() => []);
     if (!stored.length) return error('Historical weather unavailable.', 503);
     return json({
       state, location, start, end,
-      days: stored.map((r) => ({ date: r.date.toISOString().slice(0, 10), maxTemperature: r.maxTemperature, minTemperature: r.minTemperature, averageTemperature: r.averageTemperature, apparentTemperature: r.apparentTemperature, source: r.source })),
-      meta: { fetchedAt: stored.at(-1).createdAt.toISOString(), fromCache: true, stale: true, source: 'database', error: 'Live historical data unavailable. Showing data stored in the database.' },
+      days: stored.map((r) => ({ date: r.date, maxTemperature: r.maxTemperature, minTemperature: r.minTemperature, averageTemperature: r.averageTemperature, apparentTemperature: r.apparentTemperature, source: r.source })),
+      meta: { fetchedAt: isoUtc(stored.at(-1).createdAt), fromCache: true, stale: true, source: 'database', error: 'Live historical data unavailable. Showing data stored in the database.' },
     });
   }
 }

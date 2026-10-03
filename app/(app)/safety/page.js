@@ -1,5 +1,5 @@
 import { Droplets, HeartPulse, Shield, Stethoscope, Sun, Users, Activity } from 'lucide-react';
-import prisma from '@/lib/prisma';
+import { db, run } from '@/lib/db';
 import { RISK_LEVELS } from '@/lib/riskLevels';
 import SafetyCard from '@/components/SafetyCard';
 
@@ -11,7 +11,7 @@ const DOS = ['Drink water often, even when not thirsty', 'Wear light, loose cott
 const DONTS = ['Leave children, elderly people or pets in parked vehicles', 'Do strenuous work in the afternoon sun', 'Rely on alcohol, tea, coffee or sugary drinks to hydrate', 'Ignore dizziness, confusion or a very high body temperature', 'Give fluids to someone who is unconscious'];
 
 export default async function SafetyPage() {
-  const tips = await prisma.safetyTip.findMany({ orderBy: { sortOrder: 'asc' } });
+  const tips = await run(db().from('safety_tips').select('*').order('sortOrder'));
   const general = tips.filter((t) => !t.riskLevel);
   const categories = [...new Set(general.map((t) => t.category))];
   const byLevel = RISK_LEVELS.map((l) => ({ ...l, tips: tips.filter((t) => t.riskLevel === l.key) }));

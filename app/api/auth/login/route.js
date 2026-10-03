@@ -1,11 +1,11 @@
-import prisma from '@/lib/prisma';
-import { createSession, verifyPassword, hashPassword, publicUserSelect } from '@/lib/auth';
+import { db, run } from '@/lib/db';
+import { createSession, verifyPassword, hashPassword, getPublicUser } from '@/lib/auth';
 import { rateLimit, clientIp } from '@/lib/rateLimit';
 import { json, error, readJson } from '@/lib/http';
 
 // Unknown emails are checked against a dummy hash so they take as long as wrong passwords.
 let dummyHash;
-const getDummyHash = async () => (dummyHash ||= await hashPassword("climateiq-timing-equaliser"));
+const getDummyHash = async () => (dummyHash ||= await hashPassword('climateiq-timing-equaliser'));
 
 export async function POST(request) {
   const body = await readJson(request);
@@ -16,11 +16,10 @@ export async function POST(request) {
   const rl = rateLimit(`login:${clientIp(request)}:${email}`, 8, 15 * 60 * 1000);
   if (!rl.ok) return error(`Too many login attempts. Try again in ${Math.ceil(rl.retryAfter / 60)} minutes.`, 429);
 
-  const found = await prisma.user.findUnique({ where: { email }, select: { id: true, passwordHash: true } });
+  const [found] = await run(db().from('users').select('id, passwordHash').eq('email', email).limit(1));
   const ok = await verifyPassword(password, found?.passwordHash || (await getDummyHash()));
   if (!found || !ok) return error('Invalid email or password.', 401);
 
   await createSession(found.id);
-  const user = await prisma.user.findUnique({ where: { id: found.id }, select: publicUserSelect });
-  return json({ user });
+  return json({ user: await getPublicUser(found.id) });
 }

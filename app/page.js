@@ -18,7 +18,7 @@ const FEATURES = [
   [History, 'Historical analysis', 'Observed daily weather for the last 7 or 30 days, or any range back to 1940.'],
   [Thermometer, 'Climate intelligence', 'Forecast heat compared with the 5-year same-season average at each location.'],
   [ShieldCheck, 'Safety preparation', 'Risk-specific guidance and verified national emergency numbers.'],
-  [Database, 'PostgreSQL + Prisma', 'Users, favorites, search history, weather and risk records in a relational schema.'],
+  [Database, 'PostgreSQL on Supabase', 'Users, favorites, search history, weather and risk records in a relational schema with keys, constraints and RLS.'],
 ];
 
 async function LiveHotspots() {

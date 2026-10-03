@@ -1,9 +1,11 @@
-import prisma from '@/lib/prisma';
-import { createSession, hashPassword, publicUserSelect } from '@/lib/auth';
+import { db, run, isUniqueViolation } from '@/lib/db';
+import { createSession, hashPassword, getPublicUser } from '@/lib/auth';
 import { validateRegistration } from '@/lib/validation';
 import { getStateByCode } from '@/lib/riskService';
 import { rateLimit, clientIp } from '@/lib/rateLimit';
 import { json, error, readJson } from '@/lib/http';
+
+const DUPLICATE = () => error('An account with this email already exists.', 409, { fields: { email: 'This email is already registered.' } });
 
 // CREATE — registers a user (INSERT INTO users) and starts a session.
 export async function POST(request) {
@@ -15,21 +17,18 @@ export async function POST(request) {
   if (data.stateCode && !state) errors.stateCode = 'Select a valid state.';
   if (Object.keys(errors).length) return error('Please fix the highlighted fields.', 422, { fields: errors });
 
-  const exists = await prisma.user.findUnique({ where: { email: data.email }, select: { id: true } });
-  if (exists) return error('An account with this email already exists.', 409, { fields: { email: 'This email is already registered.' } });
+  const existing = await run(db().from('users').select('id').eq('email', data.email).limit(1));
+  if (existing.length) return DUPLICATE();
 
   try {
-    const user = await prisma.user.create({
-      data: {
-        fullName: data.fullName, email: data.email, phoneNumber: data.phoneNumber, city: data.city,
-        stateId: state.id, passwordHash: await hashPassword(password),
-      },
-      select: publicUserSelect,
-    });
-    await createSession(user.id);
-    return json({ user }, { status: 201 });
+    const [row] = await run(db().from('users').insert({
+      fullName: data.fullName, email: data.email, phoneNumber: data.phoneNumber, city: data.city,
+      stateId: state.id, passwordHash: await hashPassword(password), updatedAt: new Date().toISOString(),
+    }).select('id'));
+    await createSession(row.id);
+    return json({ user: await getPublicUser(row.id) }, { status: 201 });
   } catch (e) {
-    if (e.code === 'P2002') return error('An account with this email already exists.', 409, { fields: { email: 'This email is already registered.' } });
+    if (isUniqueViolation(e)) return DUPLICATE(); // users_email_key
     throw e;
   }
 }

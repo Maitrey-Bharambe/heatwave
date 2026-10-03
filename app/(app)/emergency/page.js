@@ -1,5 +1,5 @@
 import { Phone } from 'lucide-react';
-import prisma from '@/lib/prisma';
+import { db, run } from '@/lib/db';
 import { Notice } from '@/components/ui';
 import HospitalFinder from './HospitalFinder';
 
@@ -7,7 +7,7 @@ export const metadata = { title: 'Emergency' };
 export const dynamic = 'force-dynamic';
 
 export default async function EmergencyPage() {
-  const contacts = await prisma.emergencyContact.findMany({ orderBy: { sortOrder: 'asc' } });
+  const contacts = await run(db().from('emergency_contacts').select('*').order('sortOrder'));
   return (
     <>
       <div className="page-head">

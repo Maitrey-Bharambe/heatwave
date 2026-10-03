@@ -9,7 +9,7 @@ const securityHeaders = [
 const nextConfig = {
   reactStrictMode: true,
   poweredByHeader: false,
-  serverExternalPackages: ['@prisma/client', 'bcryptjs'],
+  serverExternalPackages: ['bcryptjs'],
   async headers() {
     return [{ source: '/:path*', headers: securityHeaders }];
   },

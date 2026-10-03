@@ -6,27 +6,16 @@
   "description": "ClimateIQ — Climate Intelligence & Heatwave Early Warning System for India",
   "scripts": {
     "dev": "next dev",
-    "build": "prisma generate && next build",
+    "build": "next build",
     "start": "next start",
-    "postinstall": "prisma generate",
-    "db:migrate": "prisma migrate dev",
-    "db:deploy": "prisma migrate deploy",
-    "db:seed": "node prisma/seed.mjs",
-    "db:studio": "prisma studio",
-    "db:start": "\"C:/Program Files/PostgreSQL/18/bin/pg_ctl.exe\" -D .pgdata -o \"-p 5544\" -l .pgdata/server.log start",
-    "db:stop": "\"C:/Program Files/PostgreSQL/18/bin/pg_ctl.exe\" -D .pgdata stop -m fast",
     "test": "node --test tests/heatRisk.test.mjs",
-    "vercel-build": "prisma generate && prisma migrate deploy && next build",
-    "db:supabase-sql": "node scripts/generate-supabase-sql.mjs"
-  },
-  "prisma": {
-    "seed": "node prisma/seed.mjs"
+    "db:sql": "node scripts/generate-supabase-sql.mjs"
   },
   "engines": {
     "node": ">=20.9"
   },
   "dependencies": {
-    "@prisma/client": "^6.19.3",
+    "@supabase/supabase-js": "^2.117.2",
     "bcryptjs": "^3.0.3",
     "chart.js": "^4.5.1",
     "leaflet": "^1.9.4",
@@ -37,8 +26,5 @@
     "react-chartjs-2": "^5.3.1",
     "react-dom": "^19.3.0",
     "server-only": "^0.0.1"
-  },
-  "devDependencies": {
-    "prisma": "^6.19.3"
   }
 }

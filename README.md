@@ -1,6 +1,6 @@
 # ClimateIQ — Climate Intelligence & Heatwave Early Warning System for India
 
-ClimateIQ is a database-driven climate intelligence and heat-risk monitoring platform. It combines **live Open-Meteo weather**, a **transparent heat-risk engine**, an **interactive Leaflet map of India** with real State/UT boundaries, and a **PostgreSQL database** (via Prisma ORM) that stores users, favorites, search history, weather snapshots, forecasts, historical weather and calculated risk.
+ClimateIQ is a database-driven climate intelligence and heat-risk monitoring platform. It combines **live Open-Meteo weather**, a **transparent heat-risk engine**, an **interactive Leaflet map of India** with real State/UT boundaries, and a **PostgreSQL database hosted on Supabase** that stores users, favorites, search history, weather snapshots, forecasts, historical weather and calculated risk.
 
 > Risk levels shown by this system are project-defined estimates based on current and forecast weather variables. They are **not** official government heatwave warnings.
 
@@ -39,7 +39,7 @@ Heatwaves are among India's deadliest weather hazards, and heat stress depends o
 | Frontend | Next.js 16 (App Router), React 19, JavaScript (JSX), CSS (organised global stylesheet `styles/globals.css`) |
 | Backend | Next.js Route Handlers (`app/api/**/route.js`) |
 | Database | PostgreSQL (hosted on Supabase) |
-| ORM | Prisma 6 (schema, migrations, relations, parameterised queries) |
+| Database access | @supabase/supabase-js on the server (secret key; parameterised PostgREST queries) |
 | External API | Open-Meteo (forecast, ERA5 archive) — free, no API key |
 | Map | Leaflet 1.9 + leaflet.heat, Esri gray canvas basemap |
 | Geographic data | India State/UT GeoJSON (`public/geojson/india-states.geojson`) |
@@ -58,7 +58,7 @@ Next.js Route Handlers ──────────────► Open-Meteo 
    │              │  lib/heatRisk.js (scoring engine)
    │              │  in-memory cache (15 min) + request de-duplication
    ▼              ▼
-Prisma ORM  ──►  PostgreSQL
+supabase-js ──►  Supabase PostgreSQL
 ```
 
 **Live heat-risk pipeline**
@@ -87,15 +87,15 @@ app/
 components/                 IndiaMap, LiveMap, StateSelector, WeatherCard, HeatRiskCard,
                             ForecastPanel, HistoricalChart, RiskLegend, UserData, AppShell…
 lib/
-├── prisma.js               PrismaClient singleton
+├── db.js                   Server-only Supabase client and helpers
 ├── openMeteo.js            The only module that calls Open-Meteo
 ├── heatRisk.js             Heat-risk engine (pure, unit-tested)
 ├── riskService.js          Snapshot pipeline, caching, persistence, DB fallback
 ├── auth.js                 Hashing, sessions, cookies
 ├── states.js               36 States/UTs, codes, GeoJSON mapping, monitoring coordinates
 ├── riskLevels.js  weatherCodes.js  validation.js  rateLimit.js  cache.js  format.js
-prisma/
-├── schema.prisma  migrations/  seed.mjs
+supabase/
+├── schema.sql  seed.sql  setup.sql
 public/geojson/india-states.geojson
 styles/globals.css
 tests/heatRisk.test.mjs
@@ -206,7 +206,7 @@ USERS ──┬── SESSIONS
 | **UPSERT** forecasts / history | Live refresh / Historical page | internal | replace rows on `(stateId, date)` |
 | **READ** risk trend | Heat Risk page | `GET /api/heat-risk/:state` | `SELECT score, calculated_at FROM heat_risk WHERE location_id = $1 …` |
 
-Run `npm run db:studio` to browse all tables during a demo.
+Use Supabase → Table Editor to browse all tables during a demo.
 
 ## 9. Heat-risk calculation
 
@@ -258,35 +258,47 @@ GET  /api/safety[?level=HIGH]                            GET /api/emergency
 
 - Passwords hashed with **bcrypt (12 rounds)**; plaintext is never stored or logged.
 - Sessions: a random 256-bit token in an **HTTP-only, SameSite=Lax** cookie (`Secure` in production). The database stores only `HMAC-SHA256(SESSION_SECRET, token)`. Logout deletes the session row.
-- Server-side validation on every input; all queries go through Prisma (parameterised).
+- Server-side validation on every input; all queries go through supabase-js (parameterised; no SQL string building).
 - Rate limiting on login (8 per 15 min per IP+email) and registration (10 per 15 min per IP).
 - Login uses a constant-time-equivalent path for unknown emails.
 - Security headers (`X-Content-Type-Options`, `X-Frame-Options`, `Referrer-Policy`, `Permissions-Policy`).
-- `DATABASE_URL` and `SESSION_SECRET` are server-only (no `NEXT_PUBLIC_` variables exist).
+- `SUPABASE_SECRET_KEY` and `SESSION_SECRET` are server-only (no `NEXT_PUBLIC_` variables are used); RLS blocks the public key.
 - Monitoring pages can be explored as a guest; `/favorites` and `/profile` require login (`proxy.js` + server-side session check).
 
 ## 13. Environment variables
 
 | Variable | Required | Description |
 |---|---|---|
-| `DATABASE_URL` | yes | Connection used by the app. On Supabase: **Transaction pooler** (port 6543) with `?pgbouncer=true&connection_limit=1` |
-| `DIRECT_URL` | yes | Connection used by Prisma migrations. On Supabase: **Session pooler / direct** (port 5432). Locally: same as `DATABASE_URL` |
+| `SUPABASE_URL` | yes | Project URL, e.g. `https://xxxx.supabase.co` (`NEXT_PUBLIC_SUPABASE_URL` also accepted) |
+| `SUPABASE_SECRET_KEY` | yes | Secret key `sb_secret_…` from Project Settings → API Keys (`SUPABASE_SERVICE_ROLE_KEY` also accepted). Server-only |
 | `SESSION_SECRET` | yes | Random string, ≥ 32 characters (`openssl rand -base64 32`) |
 
-Copy `.env.example` to `.env` and fill them in. Open-Meteo needs no key. ClimateIQ does **not** use the Supabase anon key or service_role key: all database access goes through Prisma on the server.
+Copy `.env.example` to `.env` and fill them in. Open-Meteo needs no key. The secret key is used only on the server (`lib/db.js`, which imports `server-only`); the browser never talks to Supabase directly.
 
 ## 14. Database on Supabase
 
-Supabase provides the PostgreSQL database; the app talks to it through Prisma like any other PostgreSQL server.
+The database is Supabase-hosted PostgreSQL. The server accesses it with `@supabase/supabase-js` and the secret key.
 
-1. **Create everything in one go:** Supabase → SQL Editor → New query → paste [`supabase/setup.sql`](supabase/setup.sql) → Run. It creates the 2 enums, 12 tables, primary/foreign keys, unique constraints and indexes, records the Prisma migration as applied (so Vercel's `prisma migrate deploy` finds nothing to do), enables Row Level Security on every table, and inserts the reference data. The last result row should read 36 states, 67 monitoring locations, 19 safety tips and 8 emergency contacts.
-2. **Connection strings:** Supabase → Connect → ORMs → Prisma. Put them in `.env` (and in Vercel) as `DATABASE_URL` (transaction pooler, port 6543) and `DIRECT_URL` (session pooler, port 5432).
+1. **Create everything in one go:** Supabase → SQL Editor → New query → paste [`supabase/setup.sql`](supabase/setup.sql) → Run. It creates the 2 enums, 12 tables, primary/foreign keys (with ON DELETE CASCADE / SET NULL), unique constraints and indexes, enables Row Level Security on every table, and inserts the reference data. The last result row should read 36 states, 67 monitoring locations, 19 safety tips and 8 emergency contacts.
+2. **Keys:** Project Settings → API Keys → copy the project URL and a secret key into `.env` (and Vercel).
 
-Row Level Security with no policies means Supabase's public Data API cannot read the tables (for example password hashes); Prisma connects as the table owner and is unaffected. `setup.sql` is `schema.sql` + `seed.sql`; `seed.sql` alone is safe to re-run. All three are generated from the Prisma migration and seed data by `npm run db:supabase-sql`; regenerate them after any schema change. (Alternative: run `npx prisma migrate deploy` and `npm run db:seed` against Supabase.)
+Row Level Security with no policies means the public (publishable / anon) key cannot read or write any table, for example password hashes; the secret key used by the server bypasses RLS.
+
+| File | Purpose |
+|---|---|
+| [`supabase/schema.sql`](supabase/schema.sql) | Tables, enums, keys, indexes, RLS. The schema's source of truth (maintained by hand) |
+| [`supabase/seed.sql`](supabase/seed.sql) | Reference data, generated from `lib/states.js` and `lib/referenceData.js`. Safe to re-run |
+| [`supabase/setup.sql`](supabase/setup.sql) | `schema.sql` + `seed.sql` in one paste |
+
+Regenerate `seed.sql` and `setup.sql` after changing the reference data or schema:
+
+```bash
+npm run db:sql
+```
 
 ## 15. Local development
 
-Prerequisites: Node.js ≥ 20.9 and a PostgreSQL database (Supabase or local).
+Prerequisites: Node.js ≥ 20.9 and a Supabase project set up as in §14.
 
 ```bash
 npm install
@@ -296,34 +308,20 @@ npm install
 cp .env.example .env
 ```
 
-Using Supabase, follow §14 and skip the next two commands. For a local PostgreSQL database, create the tables:
-
-```bash
-npx prisma migrate deploy
-```
-
-Seed the reference data (36 States/UTs, 67 monitoring locations, safety tips, emergency contacts):
-
-```bash
-npm run db:seed
-```
-
-Start the dev server at http://localhost:3000:
+Fill in `.env`, then start the dev server at http://localhost:3000:
 
 ```bash
 npm run dev
 ```
 
-During development, change the schema with `npm run db:migrate` (`prisma migrate dev`). Run the engine tests with `npm test`.
-
-> **Local cluster on the author's machine:** a project-local PostgreSQL 18 cluster lives in `.pgdata/` (port 5544). Start it with `npm run db:start` and stop it with `npm run db:stop`.
+Run the engine tests with `npm test`.
 
 ## 16. Deployment (GitHub → Vercel → Supabase)
 
 1. Set up the Supabase database (§14).
 2. Import the GitHub repository in Vercel.
-3. Add `DATABASE_URL`, `DIRECT_URL` and `SESSION_SECRET` in Vercel → Project → Settings → Environment Variables.
-4. Deploy. `vercel.json` pins functions to `syd1` (Sydney), next to the Supabase database in ap-southeast-2; change it if your Supabase region differs. Vercel runs `vercel-build`: `prisma generate && prisma migrate deploy && next build`; after `setup.sql` there are no pending migrations.
+3. Add `SUPABASE_URL`, `SUPABASE_SECRET_KEY` and `SESSION_SECRET` in Vercel → Project → Settings → Environment Variables (Production, Preview and Development).
+4. Deploy. The build is a plain `next build` and needs no database access. `vercel.json` pins functions to `syd1` (Sydney), next to the Supabase database in ap-southeast-2; change it if your Supabase region differs.
 
 Leaflet is loaded client-side only (`next/dynamic`, `ssr: false`), GeoJSON is served statically from `/public`, and no localhost URLs are hard-coded. The in-memory cache is per serverless instance; PostgreSQL holds the last snapshot for every instance as a fallback.
 
